@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ลงทะเบียนผู้ป่วย - Smart Phlebitis Alert</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+</head>
+<body>
+  <div class="topbar">
+    <a href="index.html">←</a>
+    <h1>ลงทะเบียนผู้ป่วย</h1>
+  </div>
+
+  <div class="container">
+
+    <div id="formView" class="card">
+      <label>ชื่อ-สกุลผู้ป่วย</label>
+      <input type="text" id="name" placeholder="เช่น นางสมหญิง ใจดี">
+
+      <label>HN</label>
+      <input type="text" id="hn" placeholder="เลข HN">
+
+      <label>ยา High Alert Drug</label>
+      <select id="drug"></select>
+
+      <div style="margin-top:20px;">
+        <button class="btn btn-primary" onclick="submitForm()">บันทึกและสร้าง QR Code</button>
+      </div>
+    </div>
+
+    <div id="qrView" class="card" style="display:none;">
+      <div class="had-tag" id="qrDrugLabel"></div>
+      <div class="patient-summary">
+        <div class="name" id="qrName"></div>
+        <div class="meta" id="qrHn"></div>
+      </div>
+
+      <div class="qr-box">
+        <div class="print-5cm" id="qrcode"></div>
+        <div style="margin-top:8px; font-size:12px; color:var(--muted);">ขนาดพิมพ์จริง 5x5 cm</div>
+      </div>
+
+      <div class="row" style="margin-top:16px;">
+        <button class="btn btn-outline no-print" onclick="location.href='register.html'">+ ลงทะเบียนคนถัดไป</button>
+        <button class="btn btn-primary no-print" onclick="window.print()">🖨️ พิมพ์ QR</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="config.js"></script>
+  <script>
+    apiGet('drugs').then(function (drugs) {
+      const sel = document.getElementById('drug');
+      drugs.forEach(function (d) {
+        const opt = document.createElement('option');
+        opt.value = d.key;
+        opt.textContent = d.label;
+        sel.appendChild(opt);
+      });
+    });
+
+    function submitForm() {
+      const name = document.getElementById('name').value.trim();
+      const hn = document.getElementById('hn').value.trim();
+      const drug = document.getElementById('drug').value;
+      if (!name || !hn || !drug) {
+        showToast('กรุณากรอกข้อมูลให้ครบ');
+        return;
+      }
+      const btn = event.target;
+      btn.disabled = true;
+      btn.textContent = 'กำลังบันทึก...';
+
+      apiPost('register', { name: name, hn: hn, drug: drug }).then(function (res) {
+        if (res.error) { showToast('เกิดข้อผิดพลาด: ' + res.error); btn.disabled = false; btn.textContent = 'บันทึกและสร้าง QR Code'; return; }
+        document.getElementById('formView').style.display = 'none';
+        document.getElementById('qrView').style.display = 'block';
+        document.getElementById('qrName').textContent = name;
+        document.getElementById('qrHn').textContent = 'HN: ' + hn;
+        document.getElementById('qrDrugLabel').textContent = res.drugLabel;
+
+        const qr = qrcode(0, 'M');
+        qr.addData(res.patientId);
+        qr.make();
+        document.getElementById('qrcode').innerHTML = qr.createSvgTag({ scalable: true });
+      }).catch(function (err) {
+        showToast('เกิดข้อผิดพลาด: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'บันทึกและสร้าง QR Code';
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>แดชบอร์ดแจ้งเตือน - Smart Phlebitis Alert</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="topbar">
+    <a href="index.html">←</a>
+    <h1>แดชบอร์ดแจ้งเตือน</h1>
+    <span class="badge" id="countBadge">0 ราย</span>
+  </div>
+
+  <div class="container">
+    <div class="card" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+      <div style="font-size:13px; color:var(--muted);">
+        เปิดหน้านี้ค้างไว้ที่จุดพยาบาล ระบบจะส่งเสียง + แจ้งเตือนอัตโนมัติเมื่อถึงรอบประเมิน
+      </div>
+      <button class="btn btn-outline" style="width:auto; padding:8px 14px;" onclick="enableSound()" id="soundBtn">🔈 เปิดเสียง</button>
+    </div>
+
+    <div id="list"></div>
+  </div>
+
+  <div class="modal-overlay" id="alertModal">
+    <div class="modal-box">
+      <div style="font-size:40px;">🔔</div>
+      <h2>ถึงเวลาประเมิน!</h2>
+      <div id="alertNames" style="font-size:15px; margin-bottom:14px;"></div>
+      <button class="btn btn-primary" onclick="dismissAlert()">รับทราบ</button>
+    </div>
+  </div>
+
+  <audio id="alertAudio" loop>
+    <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg">
+  </audio>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="config.js"></script>
+  <script>
+    let soundEnabled = false;
+    let currentlyAlerting = false;
+    let dismissedUntilNextChange = {};
+
+    function enableSound() {
+      const audio = document.getElementById('alertAudio');
+      audio.play().then(function () {
+        audio.pause();
+        audio.currentTime = 0;
+        soundEnabled = true;
+        document.getElementById('soundBtn').textContent = '🔊 เสียงเปิดอยู่';
+      }).catch(function () {});
+    }
+
+    function fmtCountdown(ms) {
+      if (ms <= 0) return 'ถึงเวลาแล้ว';
+      const totalMin = Math.floor(ms / 60000);
+      const h = Math.floor(totalMin / 60);
+      const m = totalMin % 60;
+      return (h > 0 ? h + ' ชม. ' : '') + m + ' นาที';
+    }
+
+    function render(list) {
+      document.getElementById('countBadge').textContent = list.length + ' ราย';
+      const container = document.getElementById('list');
+      if (!list.length) {
+        container.innerHTML = '<div class="empty-state">ยังไม่มีผู้ป่วยที่กำลังติดตามอยู่</div>';
+        return;
+      }
+      list.sort(function (a, b) {
+        return (a.nextDueTime || Infinity) - (b.nextDueTime || Infinity);
+      });
+      container.innerHTML = list.map(function (p) {
+        const now = new Date().getTime();
+        const remain = p.nextDueTime ? p.nextDueTime - now : null;
+        return '<div class="due-card ' + (p.isDue ? 'is-due' : '') + '">' +
+          '<div>' +
+            '<div style="font-weight:700;">' + p.name + ' <span style="font-weight:400; color:var(--muted); font-size:12.5px;">HN ' + p.hn + '</span></div>' +
+            '<div style="font-size:12.5px; color:var(--muted); margin-top:2px;">' + p.drugLabel + ' | ครั้งที่ ' + (Number(p.doseCount) + 1) + '</div>' +
+          '</div>' +
+          '<div class="countdown" style="color:' + (p.isDue ? 'var(--primary)' : 'var(--text)') + ';">' +
+            (p.isDue ? 'ถึงเวลาประเมิน' : fmtCountdown(remain)) +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    function checkDue(list) {
+      const dueNow = list.filter(function (p) {
+        if (!p.isDue) return false;
+        if (dismissedUntilNextChange[p.patientId] === p.nextDueTime) return false;
+        return true;
+      });
+      if (dueNow.length > 0 && !currentlyAlerting) {
+        currentlyAlerting = true;
+        document.getElementById('alertNames').innerHTML = dueNow.map(function (p) {
+          return '<div>' + p.name + ' — ' + p.drugLabel + '</div>';
+        }).join('');
+        document.getElementById('alertModal').classList.add('show');
+        if (soundEnabled) {
+          const audio = document.getElementById('alertAudio');
+          audio.currentTime = 0;
+          audio.play().catch(function () {});
+        }
+        if ('vibrate' in navigator) navigator.vibrate([300, 100, 300]);
+        window._pendingDismiss = dueNow;
+      }
+    }
+
+    function dismissAlert() {
+      document.getElementById('alertModal').classList.remove('show');
+      const audio = document.getElementById('alertAudio');
+      audio.pause();
+      audio.currentTime = 0;
+      currentlyAlerting = false;
+      (window._pendingDismiss || []).forEach(function (p) {
+        dismissedUntilNextChange[p.patientId] = p.nextDueTime;
+      });
+    }
+
+    function poll() {
+      apiGet('dashboard').then(function (list) {
+        render(list);
+        checkDue(list);
+      }).catch(function (err) { console.error(err); });
+    }
+
+    poll();
+    setInterval(poll, 30000);
+  </script>
+</body>
+</html>

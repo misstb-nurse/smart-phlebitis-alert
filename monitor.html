@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>แบบบันทึกติดตามให้ยา HAD - Smart Phlebitis Alert</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+  <div class="topbar">
+    <a href="index.html">←</a>
+    <h1>แบบบันทึกติดตามให้ยา HAD</h1>
+  </div>
+
+  <div class="container">
+
+    <!-- STEP 1: SCAN -->
+    <div id="scanView" class="card" style="text-align:center;">
+      <div style="font-size:15px; font-weight:700; margin-bottom:10px;">สแกน QR Code ของผู้ป่วย</div>
+      <div id="qrReader"></div>
+      <button class="btn btn-outline" style="margin-top:14px;" onclick="startScan()">📷 เริ่มสแกน</button>
+      <div style="margin-top:10px; font-size:13px; color:var(--muted);">หรือกรอกรหัสผู้ป่วยด้วยตนเอง</div>
+      <input type="text" id="manualId" placeholder="Patient ID หรือ HN" style="margin-top:6px;">
+      <button class="btn btn-secondary" style="margin-top:8px;" onclick="loadPatient(document.getElementById('manualId').value)">โหลดข้อมูล</button>
+    </div>
+
+    <!-- STEP 2: ASSESS -->
+    <div id="assessView" style="display:none;">
+      <div class="card">
+        <div class="had-tag" id="drugLabel"></div>
+        <div class="patient-summary">
+          <div class="name" id="pName"></div>
+          <div class="meta" id="pMeta"></div>
+        </div>
+
+        <label>เวลาที่ประเมิน</label>
+        <input type="text" id="assessTime" readonly>
+
+        <label>ผู้ประเมิน (ชื่อพยาบาล)</label>
+        <input type="text" id="assessor" placeholder="ชื่อ-สกุลผู้บันทึก">
+
+        <div id="itemsContainer"></div>
+
+        <label>บันทึกเพิ่มเติม</label>
+        <textarea id="note" placeholder="รายละเอียดเพิ่มเติม (ถ้ามี)"></textarea>
+
+        <label>แนบรูปภาพ</label>
+        <input type="file" id="photoInput" accept="image/*" capture="environment">
+        <div id="photoPreview" style="margin-top:8px;"></div>
+
+        <div style="margin-top:20px;">
+          <button class="btn btn-primary" onclick="saveAssessment()">💾 บันทึกผลประเมิน</button>
+        </div>
+        <div style="margin-top:10px;">
+          <button class="btn btn-secondary" onclick="location.href='monitor.html'">สแกนคนถัดไป</button>
+        </div>
+        <div style="margin-top:10px;">
+          <button class="btn btn-outline" style="border-color:var(--success); color:var(--success);" onclick="confirmOff()">✅ ให้ยาเสร็จสิ้น (OFF ยา)</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="modal-overlay" id="offModal">
+    <div class="modal-box">
+      <h2>ยืนยันการ OFF ยา?</h2>
+      <p style="color:var(--muted);">ระบบจะหยุดแจ้งเตือนคิวประเมินของผู้ป่วยรายนี้</p>
+      <div class="row" style="margin-top:16px;">
+        <button class="btn btn-secondary" onclick="document.getElementById('offModal').classList.remove('show')">ยกเลิก</button>
+        <button class="btn btn-primary" onclick="doMarkOff()">ยืนยัน</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="config.js"></script>
+  <script>
+    let currentPatient = null;
+    let photoBase64 = null;
+    let html5QrCode = null;
+
+    function startScan() {
+      const readerEl = document.getElementById('qrReader');
+      readerEl.innerHTML = '';
+      html5QrCode = new Html5Qrcode('qrReader');
+      html5QrCode.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: 220 },
+        function (decodedText) {
+          html5QrCode.stop();
+          loadPatient(decodedText);
+        },
+        function () {}
+      ).catch(function (err) {
+        showToast('เปิดกล้องไม่สำเร็จ: ' + err);
+      });
+    }
+
+    function loadPatient(patientId) {
+      if (!patientId) { showToast('ไม่พบรหัสผู้ป่วย'); return; }
+      apiGet('patient', { id: patientId }).then(function (p) {
+        if (!p) { showToast('ไม่พบข้อมูลผู้ป่วย'); return; }
+        if (p.Status !== 'Active') { showToast('ผู้ป่วยรายนี้ OFF ยาแล้ว'); return; }
+        currentPatient = p;
+        renderAssessForm(p);
+      }).catch(function (err) { showToast('เกิดข้อผิดพลาด: ' + err.message); });
+    }
+
+    function renderAssessForm(p) {
+      document.getElementById('scanView').style.display = 'none';
+      document.getElementById('assessView').style.display = 'block';
+      document.getElementById('drugLabel').textContent = p.DrugConfig.label;
+      document.getElementById('pName').textContent = p.Name;
+      document.getElementById('pMeta').textContent = 'HN: ' + p.HN + ' | ครั้งที่ประเมิน: ' + (Number(p.DoseCount) + 1);
+
+      const now = new Date();
+      document.getElementById('assessTime').value = now.toLocaleString('th-TH');
+
+      const cfg = p.DrugConfig;
+      let html = '';
+      html += renderSection('อาการทางคลินิก (Vital / Clinical)', cfg.vitalItems, true);
+      if (cfg.labItems.length) html += renderSection('ค่าตามแพทย์สั่ง (Lab)', cfg.labItems, true);
+      html += renderSection('อาการที่สังเกตหรือผู้ป่วย/ญาติแจ้ง', cfg.symptomItems, false);
+      document.getElementById('itemsContainer').innerHTML = html;
+    }
+
+    function renderSection(title, items, withReport) {
+      let html = '<div class="section-title">' + title + '</div>';
+      items.forEach(function (label, idx) {
+        html += '<div class="item-row">' +
+          '<div class="item-label">' + label + '</div>' +
+          '<div class="toggle-group" data-item="' + escapeAttr(label) + '">' +
+            '<button type="button" class="toggle-btn" data-val="check" onclick="toggleItem(this)">✓</button>' +
+            '<button type="button" class="toggle-btn" data-val="x" onclick="toggleItem(this)">✕</button>' +
+            (withReport ? '<button type="button" class="toggle-btn" data-val="report" onclick="toggleItem(this)">O</button>' : '') +
+          '</div></div>';
+      });
+      return html;
+    }
+
+    function escapeAttr(s) { return s.replace(/"/g, '&quot;'); }
+
+    function toggleItem(btn) {
+      const group = btn.parentElement;
+      Array.from(group.children).forEach(function (b) {
+        b.classList.remove('active-check', 'active-x', 'active-report');
+      });
+      const val = btn.getAttribute('data-val');
+      btn.classList.add(val === 'check' ? 'active-check' : val === 'x' ? 'active-x' : 'active-report');
+      group.setAttribute('data-selected', val);
+    }
+
+    document.getElementById('photoInput').addEventListener('change', function (e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function (ev) {
+        photoBase64 = ev.target.result;
+        document.getElementById('photoPreview').innerHTML =
+          '<img src="' + photoBase64 + '" style="max-width:100%; border-radius:10px;">';
+      };
+      reader.readAsDataURL(file);
+    });
+
+    function collectItems() {
+      const groups = document.querySelectorAll('#itemsContainer .toggle-group');
+      const items = [];
+      groups.forEach(function (g) {
+        items.push({
+          label: g.getAttribute('data-item'),
+          value: g.getAttribute('data-selected') || ''
+        });
+      });
+      return items;
+    }
+
+    function saveAssessment() {
+      const assessor = document.getElementById('assessor').value.trim();
+      if (!assessor) { showToast('กรุณากรอกชื่อผู้ประเมิน'); return; }
+
+      const btn = event.target;
+      btn.disabled = true;
+      btn.textContent = 'กำลังบันทึก...';
+
+      apiPost('saveAssessment', {
+        patientId: currentPatient.PatientID,
+        assessor: assessor,
+        items: collectItems(),
+        note: document.getElementById('note').value,
+        photoBase64: photoBase64,
+        photoName: currentPatient.HN + '_' + new Date().getTime() + '.jpg'
+      }).then(function (res) {
+        if (res.error) { showToast('เกิดข้อผิดพลาด: ' + res.error); btn.disabled = false; btn.textContent = '💾 บันทึกผลประเมิน'; return; }
+        showToast('บันทึกผลประเมินเรียบร้อย');
+        setTimeout(function () { location.href = 'monitor.html'; }, 1200);
+      }).catch(function (err) {
+        showToast('เกิดข้อผิดพลาด: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = '💾 บันทึกผลประเมิน';
+      });
+    }
+
+    function confirmOff() {
+      document.getElementById('offModal').classList.add('show');
+    }
+
+    function doMarkOff() {
+      apiPost('markOff', { patientId: currentPatient.PatientID }).then(function () {
+        document.getElementById('offModal').classList.remove('show');
+        showToast('OFF ยาเรียบร้อย');
+        setTimeout(function () { location.href = 'index.html'; }, 1200);
+      });
+    }
+  </script>
+</body>
+</html>

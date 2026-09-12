@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>พิมพ์แบบบันทึกติดตามให้ยา HAD - Smart Phlebitis Alert</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="topbar no-print">
+    <a href="index.html">←</a>
+    <h1>พิมพ์แบบบันทึกติดตามให้ยา HAD</h1>
+  </div>
+
+  <div class="container">
+    <div class="card no-print" id="searchCard">
+      <label>ค้นหาด้วย Patient ID (จาก QR) หรือ HN</label>
+      <input type="text" id="searchId" placeholder="วาง Patient ID หรือพิมพ์ HN">
+      <button class="btn btn-primary" style="margin-top:12px;" onclick="doSearch()">ค้นหา</button>
+    </div>
+
+    <div id="reportRoot"></div>
+
+    <div class="row no-print" id="actionRow" style="display:none; margin-top:14px;">
+      <button class="btn btn-secondary" onclick="window.print()">🖨️ พิมพ์ผ่านเบราว์เซอร์</button>
+      <button class="btn btn-primary" id="pdfBtn" onclick="downloadPdf()">⬇️ ส่งออก PDF</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="config.js"></script>
+  <script>
+    let currentId = '';
+
+    function doSearch() {
+      const id = document.getElementById('searchId').value.trim();
+      if (!id) { showToast('กรุณากรอกรหัสค้นหา'); return; }
+      currentId = id;
+      loadReport(id);
+    }
+
+    function loadReport(id) {
+      apiGet('patient', { id: id }).then(function (p) {
+        if (!p) { showToast('ไม่พบข้อมูลผู้ป่วย'); return; }
+        apiGet('assessments', { id: id }).then(function (assessments) {
+          renderReport(p, assessments);
+          document.getElementById('actionRow').style.display = 'flex';
+        });
+      }).catch(function (err) { showToast('เกิดข้อผิดพลาด: ' + err.message); });
+    }
+
+    function renderReport(p, assessments) {
+      let html = '<div class="card">';
+      html += '<div class="had-tag">' + p.DrugConfig.label + '</div>';
+      html += '<div class="patient-summary"><div class="name">' + p.Name + '</div>' +
+        '<div class="meta">HN: ' + p.HN + ' | สถานะ: ' + (p.Status === 'Active' ? 'กำลังติดตาม' : 'ให้ยาเสร็จสิ้น') + '</div></div>';
+
+      if (!assessments.length) {
+        html += '<div class="empty-state">ยังไม่มีบันทึกการประเมิน</div>';
+      } else {
+        assessments.forEach(function (a, idx) {
+          html += '<div class="section-title">ครั้งที่ ' + (idx + 1) + ' — ' + new Date(a.dateTime).toLocaleString('th-TH') + '</div>';
+          html += '<div style="font-size:13px; color:var(--muted); margin-bottom:6px;">ผู้ประเมิน: ' + a.assessor + '</div>';
+          a.items.forEach(function (it) {
+            const mark = it.value === 'check' ? '✓ ใช่/มีอาการ' : it.value === 'x' ? '✕ ไม่ใช่/ไม่มีอาการ' : it.value === 'report' ? '○ รายงานแพทย์แล้ว' : '-';
+            html += '<div class="item-row"><div class="item-label">' + it.label + '</div><div style="font-weight:700; font-size:13px;">' + mark + '</div></div>';
+          });
+          if (a.note) html += '<div style="margin-top:6px; font-size:13px;"><b>บันทึกเพิ่มเติม:</b> ' + a.note + '</div>';
+          if (a.photoUrl) html += '<div style="margin-top:6px;"><a href="' + a.photoUrl + '" target="_blank" style="font-size:13px;">📷 ดูรูปภาพแนบ</a></div>';
+        });
+      }
+      html += '</div>';
+      document.getElementById('reportRoot').innerHTML = html;
+    }
+
+    function downloadPdf() {
+      const btn = document.getElementById('pdfBtn');
+      btn.disabled = true;
+      btn.textContent = 'กำลังสร้าง PDF...';
+      apiGet('pdf', { id: currentId }).then(function (res) {
+        btn.disabled = false;
+        btn.textContent = '⬇️ ส่งออก PDF';
+        if (res.url) window.open(res.url, '_blank');
+      }).catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = '⬇️ ส่งออก PDF';
+        showToast('เกิดข้อผิดพลาด: ' + err.message);
+      });
+    }
+
+    // รองรับ ?id=xxxx ต่อท้าย URL เพื่อลิงก์ตรงมาจากที่อื่นได้
+    const urlId = new URLSearchParams(location.search).get('id');
+    if (urlId) {
+      document.getElementById('searchId').value = urlId;
+      currentId = urlId;
+      loadReport(urlId);
+    }
+  </script>
+</body>
+</html>

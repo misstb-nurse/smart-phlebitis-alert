@@ -43,7 +43,8 @@
     function loadReport(id) {
       apiGet('patient', { id: id }).then(function (p) {
         if (!p) { showToast('ไม่พบข้อมูลผู้ป่วย'); return; }
-        apiGet('assessments', { id: id }).then(function (assessments) {
+        currentId = p.PatientID; // ใช้ Patient ID จริงเสมอ เผื่อผู้ใช้ค้นด้วย HN
+        apiGet('assessments', { id: currentId }).then(function (assessments) {
           renderReport(p, assessments);
           document.getElementById('actionRow').style.display = 'flex';
         });

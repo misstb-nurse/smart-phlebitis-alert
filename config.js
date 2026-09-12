@@ -1,6 +1,6 @@
 // ==== ตั้งค่าตรงนี้หลัง Deploy Apps Script เสร็จ ====
 // นำ URL แบบ .../exec ที่ได้จากการ Deploy Apps Script (Web App) มาวางแทนตรงนี้
-const API_BASE_URL = 'PASTE_YOUR_APPS_SCRIPT_EXEC_URL_HERE';
+const API_BASE_URL = 'https://script.google.com/macros/s/AKfycbz4f462pYV66zZYz8USIDA4uBPXwlMZCyVbQ1173-_Y7m-NpK49uaQ5NduabivJuW34/exec';
 
 /** เรียก API แบบอ่านข้อมูล (GET) */
 function apiGet(action, params) {
